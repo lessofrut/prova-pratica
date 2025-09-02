@@ -3,9 +3,52 @@ import bodyParser from "body-parser";
 import crypto from "crypto";
 import jwt from "jsonwebtoken";
 import { addEntry } from "./ledger.js";
+import fs from "fs";
 
 const app = express();
 app.use(bodyParser.json());
+
+const KEYS_DIR = "./keys";
+const PRIVATE_KEY_PATH = `${KEYS_DIR}/issuer-private.pem`;
+const PUBLIC_KEY_PATH = `${KEYS_DIR}/issuer-public.pem`;
+
+let issuerPrivateKey, issuerPublicKey;
+
+// Funzione per generare chiavi se non esistono
+function initKeys() {
+  if (!fs.existsSync(KEYS_DIR)) {
+    fs.mkdirSync(KEYS_DIR);
+  }
+
+  if (!fs.existsSync(PRIVATE_KEY_PATH) || !fs.existsSync(PUBLIC_KEY_PATH)) {
+    console.log("Creating new key pair...");
+
+    const { privateKey, publicKey } = crypto.generateKeyPairSync("rsa", {
+      modulusLength: 2048,
+      publicKeyEncoding: {
+        type: "spki",
+        format: "pem",
+      },
+      privateKeyEncoding: {
+        type: "pkcs8",
+        format: "pem",
+      },
+    });
+
+    fs.writeFileSync(PRIVATE_KEY_PATH, privateKey);
+    fs.writeFileSync(PUBLIC_KEY_PATH, publicKey);
+
+    issuerPrivateKey = privateKey;
+    issuerPublicKey = publicKey;
+  } else {
+    console.log("Using existing keys.");
+    issuerPrivateKey = fs.readFileSync(PRIVATE_KEY_PATH, "utf8");
+    issuerPublicKey = fs.readFileSync(PUBLIC_KEY_PATH, "utf8");
+  }
+}
+
+// Inizializza le chiavi all’avvio
+initKeys();
 
 // Creazione DID
 app.post("/create-did", (req, res) => {
@@ -26,7 +69,7 @@ app.post("/create-did", (req, res) => {
 
 // Emissione VC
 app.post("/issue-vc", (req, res) => {
-  const { issuerDid, subjectDid, privateKey, claims } = req.body;
+  const { issuerDid, subjectDid, claims } = req.body;
 
   const vcPayload = {
     iss: issuerDid,
@@ -34,13 +77,22 @@ app.post("/issue-vc", (req, res) => {
     claims,
     iat: Math.floor(Date.now() / 1000),
   };
+try {
+    // Firma della VC con la chiave privata dell’Issuer
+    const token = jwt.sign(vcPayload, issuerPrivateKey, { algorithm: "RS256" });
 
-  const token = jwt.sign(vcPayload, privateKey, { algorithm: "RS256" });
+    // Registra l’emissione nel ledger
+    const record = { action: "ISSUE_VC", issuerDid, subjectDid, claims };
+    const block = addEntry(record);
 
-  const record = { action: "ISSUE_VC", issuerDid, subjectDid, claims };
-  const block = addEntry(record);
-
-  res.json({ vc: token, block });
+    res.json({
+      vc: token,
+      publicKey: issuerPublicKey, // la pubkey serve ai Verifier
+      block,
+    });
+  } catch (err) {
+    res.status(500).json({ error: "Errore nell'emissione della VC", details: err.message });
+  }
 });
 
 // Verifica VC
@@ -72,3 +124,4 @@ app.get("/ledger", (req, res) => {
 app.listen(3000, () =>
   console.log("Server running on http://localhost:3000")
 );
+
