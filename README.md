@@ -17,7 +17,7 @@ Le VC sono firmate con la chiave privata dell'issuer e verificate con la chiave 
    → genera un nuovo DID e la coppia di chiavi (pubblica/privata).
 
 2. `POST /issue-vc`  
-   JSON: `{ issuerDid, issuerPrivateKey, subjectDid, claim }`  
+   JSON: `{ issuerDid, subjectDid, claim }`  
    → rilascia una VC firmata.
 
 3. `POST /verify-vc`  
@@ -26,5 +26,5 @@ Le VC sono firmate con la chiave privata dell'issuer e verificate con la chiave 
 
 ## Avvio
 ```bash
-npm install
-npm start
+npm install express body-parser jsonwebtoken
+node server.js
